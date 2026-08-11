@@ -1,0 +1,35 @@
+[workspace]
+resolver = "2"
+members = ["crates/*"]
+
+[workspace.package]
+edition = "2024"
+license = "Apache-2.0"
+rust-version = "1.92"
+
+[profile.release]
+opt-level = 3
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 2
+
+[profile.dev]
+opt-level = 1
+
+[workspace.dependencies]
+xengui = { path = "../workspaces/xen-workspace/crates/xengui" }
+xenframe = { path = "../workspaces/xen-workspace/crates/xenframe" }
+
+gui = { path = "crates/gui" }
+razer = { path = "crates/razer" }
+
+hidapi = { version = "2.6.6", features = ["windows-native"] }
+thiserror = "2.0.20"
+windows = { version = "0.62.2", features = [
+    "Win32_Devices_HumanInterfaceDevice",
+    "Win32_Foundation",
+] }

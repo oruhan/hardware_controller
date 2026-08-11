@@ -1,0 +1,9 @@
+[package]
+name = "razer"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+hidapi.workspace = true
+thiserror.workspace = true
+windows.workspace = true

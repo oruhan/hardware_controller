@@ -1,0 +1,9 @@
+[package]
+name = "gui"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+xengui.workspace = true
+xenframe.workspace = true
+razer.workspace = true
