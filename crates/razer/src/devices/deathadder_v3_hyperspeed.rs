@@ -11,6 +11,7 @@ const DEATHADDER_V3_HYPERSPEED_WIRELESS_PID: u16 = 0x00c5;
 
 pub struct DaV3HS {
     device: RazerDevice,
+    wireless: bool,
 }
 
 impl DaV3HS {
@@ -61,10 +62,17 @@ impl DaV3HS {
 
             return Ok(Self {
                 device: RazerDevice::new(device),
+                wireless: pid == DEATHADDER_V3_HYPERSPEED_WIRELESS_PID,
             });
         }
 
         Err(RazerError::DeviceNotFound)
+    }
+
+    /// True when connected through the HyperSpeed 2.4GHz dongle rather
+    /// than the wired USB PID.
+    pub fn is_wireless(&self) -> bool {
+        self.wireless
     }
 
     pub fn battery(&mut self) -> Result<Battery, RazerError> {

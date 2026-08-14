@@ -3,7 +3,7 @@
 use std::sync::atomic::{ AtomicU64, Ordering };
 use std::time::Duration;
 
-use devices::{ BatteryStatus, ChargingState, DeviceKind, catalog };
+use devices::{ BatteryStatus, ChargingState, ConnectionType, DeviceKind, catalog };
 use xengui::{ *, task::{ spawn, spawn_blocking } };
 use xenframe::{ App, AppConfig, WindowPosition };
 
@@ -276,8 +276,11 @@ fn sidebar(
         column = column.child(picker);
     }
 
+    // Column direction here keeps overflow along the height axis (main
+    // axis) and stretches width (cross axis) - a Row wrapper would clip
+    // height to the container and never register overflow.
     column = column.child(
-        View::new().flex_grow(1.0).width(pct!(100.0)).overflow_y(Overflow::Auto).child(list)
+        Column::new().flex_grow(1.0).width(pct!(100.0)).overflow_y(Overflow::Auto).child(list)
     );
 
     column
@@ -384,11 +387,38 @@ fn status_row(icon: char, label: &str, value: String) -> View {
         )
 }
 
+fn connection_icon(connection: ConnectionType) -> char {
+    match connection {
+        ConnectionType::Usb => codepoints::USB,
+        ConnectionType::Wireless2_4Ghz => codepoints::SETTINGS_INPUT_ANTENNA,
+        ConnectionType::Bluetooth => codepoints::BLUETOOTH,
+        ConnectionType::Unknown => codepoints::LINK_OFF,
+    }
+}
+
+fn connection_label(connection: ConnectionType) -> &'static str {
+    match connection {
+        ConnectionType::Usb => "USB",
+        ConnectionType::Wireless2_4Ghz => "2.4GHz",
+        ConnectionType::Bluetooth => "Bluetooth",
+        ConnectionType::Unknown => "Bilinmiyor",
+    }
+}
+
 fn status_card(entry: &DeviceEntry) -> View {
     let theme = current_theme();
     let charging = entry.battery
         .map(|b| matches!(b.state, ChargingState::Charging))
         .unwrap_or(false);
+
+    let (connection_icon, connection_text) = match entry.battery {
+        Some(status) if entry.connected =>
+            (
+                connection_icon(status.connection),
+                format!("Bağlı ({})", connection_label(status.connection)),
+            ),
+        _ => (codepoints::LINK_OFF, "Bağlı değil".to_string()),
+    };
 
     let mut card = m3_card()
         .width(pct!(100.0))
@@ -412,13 +442,7 @@ fn status_card(entry: &DeviceEntry) -> View {
                 (if charging { "Şarj oluyor" } else { "Şarjda değil" }).to_string()
             )
         )
-        .child(
-            status_row(
-                codepoints::BLUETOOTH,
-                "Bağlantı",
-                (if entry.connected { "Bağlı" } else { "Bağlı değil" }).to_string()
-            )
-        );
+        .child(status_row(connection_icon, "Bağlantı", connection_text));
 
     if let Some(err) = &entry.error {
         card = card.child(
@@ -453,7 +477,7 @@ fn detail_panel(entry: Option<&DeviceEntry>, breathe_phase: f32) -> View {
             );
     };
 
-    View::new()
+    Column::new()
         .flex_grow(1.0)
         .height(pct!(100.0))
         .overflow_y(Overflow::Auto)
