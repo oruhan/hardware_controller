@@ -23,9 +23,11 @@ opt-level = 1
 [workspace.dependencies]
 xengui = { path = "../workspaces/xen-workspace/crates/xengui" }
 xenframe = { path = "../workspaces/xen-workspace/crates/xenframe" }
+xengui-icons = { path = "../workspaces/xen-workspace/crates/xengui-icons" }
 
 gui = { path = "crates/gui" }
 razer = { path = "crates/razer" }
+devices = { path = "crates/devices" }
 
 hidapi = { version = "2.6.6", features = ["windows-native"] }
 thiserror = "2.0.20"

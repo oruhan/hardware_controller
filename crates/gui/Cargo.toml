@@ -5,5 +5,7 @@ edition = "2024"
 
 [dependencies]
 xengui.workspace = true
+xengui-icons.workspace = true
 xenframe.workspace = true
 razer.workspace = true
+devices.workspace = true
