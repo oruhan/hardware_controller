@@ -74,7 +74,9 @@ impl RazerDevice {
             }
 
             match response.status {
-                RazerStatus::New | RazerStatus::Busy => continue,
+                RazerStatus::New | RazerStatus::Busy => {
+                    continue;
+                }
                 RazerStatus::Success => {
                     if response.command != request.command {
                         return Err(RazerError::UnexpectedCommand {
@@ -98,20 +100,23 @@ impl RazerDevice {
                 RazerStatus::Failure => {
                     return Err(RazerError::UnexpectedStatus(RazerStatus::Failure));
                 }
-                RazerStatus::Timeout => return Err(RazerError::Timeout),
-                status => return Err(RazerError::UnexpectedStatus(status)),
+                RazerStatus::Timeout => {
+                    return Err(RazerError::Timeout);
+                }
+                status => {
+                    return Err(RazerError::UnexpectedStatus(status));
+                }
             }
         }
 
         Err(RazerError::Timeout)
     }
 
-    pub(crate) fn set_polling_rate(
-        &mut self,
-        rate: PollingRate,
-    ) -> Result<(), RazerError> {
+    pub(crate) fn set_polling_rate(&mut self, rate: PollingRate) -> Result<(), RazerError> {
         let transaction_id = self.next_transaction_id();
+
         let request = RazerRequest::polling_rate(transaction_id, rate.protocol_value());
+
         let response = self.execute(request)?;
 
         if response.argument(0) != Some(0x01) {

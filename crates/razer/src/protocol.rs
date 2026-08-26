@@ -7,8 +7,6 @@ pub const STATUS_SUCCESS: u8 = 0x02;
 pub const STATUS_FAILURE: u8 = 0x03;
 pub const STATUS_TIMEOUT: u8 = 0x04;
 
-pub const REQUEST_TYPE: u8 = 0x02;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PollingRate {
     Hz125,
@@ -76,7 +74,7 @@ impl RazerCommand {
 
     pub const POLLING_RATE: Self = Self {
         class: 0x00,
-        id: 0x8E,
+        id: 0x8e,
     };
 }
 
@@ -154,9 +152,8 @@ impl RazerRequest {
         Self::new(transaction_id, RazerCommand::CHARGING_STATUS)
     }
 
-    pub(crate) fn polling_rate(transaction_id: u8, rate: PollingRate) -> Self {
-        Self::new(transaction_id, RazerCommand::POLLING_RATE)
-            .with_arguments(&[0x01, rate.protocol_value()])
+    pub(crate) fn polling_rate(transaction_id: u8, value: u8) -> Self {
+        Self::new(transaction_id, RazerCommand::POLLING_RATE).with_arguments(&[0x01, value])
     }
 
     pub(crate) fn encode(&self) -> [u8; REPORT_LEN] {
@@ -173,8 +170,7 @@ impl RazerRequest {
         report[6] = self.command.class;
         report[7] = self.command.id;
 
-        report[8..8 + self.argument_len]
-            .copy_from_slice(&self.arguments[..self.argument_len]);
+        report[8..8 + self.argument_len].copy_from_slice(&self.arguments[..self.argument_len]);
 
         report[88] = calculate_crc(&report);
         report[89] = 0x00;
@@ -188,4 +184,45 @@ pub(crate) fn calculate_crc(report: &[u8; REPORT_LEN]) -> u8 {
         .iter()
         .copied()
         .fold(0u8, |crc, byte| crc ^ byte)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn polling_rate_protocol_values() {
+        assert_eq!(PollingRate::Hz125.protocol_value(), 0x08);
+        assert_eq!(PollingRate::Hz500.protocol_value(), 0x02);
+        assert_eq!(PollingRate::Hz1000.protocol_value(), 0x01);
+    }
+
+    #[test]
+    fn polling_rate_hz_values() {
+        assert_eq!(PollingRate::Hz125.hz(), 125);
+        assert_eq!(PollingRate::Hz500.hz(), 500);
+        assert_eq!(PollingRate::Hz1000.hz(), 1000);
+    }
+
+    #[test]
+    fn polling_rate_request_arguments() {
+        let request = RazerRequest::polling_rate(0x06, 0x08);
+        let report = request.encode();
+
+        assert_eq!(report[0], STATUS_NEW);
+        assert_eq!(report[1], 0x06);
+        assert_eq!(report[5], 0x02);
+        assert_eq!(report[6], 0x00);
+        assert_eq!(report[7], 0x8e);
+        assert_eq!(report[8], 0x01);
+        assert_eq!(report[9], 0x08);
+    }
+
+    #[test]
+    fn polling_rate_request_crc() {
+        let request = RazerRequest::polling_rate(0x06, 0x08);
+        let report = request.encode();
+
+        assert_eq!(report[88], calculate_crc(&report));
+    }
 }

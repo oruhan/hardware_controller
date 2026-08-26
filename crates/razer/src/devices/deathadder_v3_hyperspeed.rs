@@ -3,6 +3,7 @@ use hidapi::HidApi;
 use crate::battery::Battery;
 use crate::device::RazerDevice;
 use crate::error::RazerError;
+use crate::protocol::PollingRate;
 
 const RAZER_VID: u16 = 0x1532;
 
@@ -73,6 +74,10 @@ impl DaV3HS {
     /// than the wired USB PID.
     pub fn is_wireless(&self) -> bool {
         self.wireless
+    }
+
+    pub fn set_polling_rate(&mut self, rate: PollingRate) -> Result<(), RazerError> {
+        self.device.set_polling_rate(rate)
     }
 
     pub fn battery(&mut self) -> Result<Battery, RazerError> {
