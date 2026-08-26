@@ -152,8 +152,8 @@ impl RazerRequest {
         Self::new(transaction_id, RazerCommand::CHARGING_STATUS)
     }
 
-    pub(crate) fn polling_rate(transaction_id: u8, value: u8) -> Self {
-        Self::new(transaction_id, RazerCommand::POLLING_RATE).with_arguments(&[0x01, value])
+    pub(crate) fn polling_rate(rate: PollingRate) -> Self {
+        Self::new(0x1f, RazerCommand::POLLING_RATE).with_arguments(&[0x01, rate.protocol_value()])
     }
 
     pub(crate) fn encode(&self) -> [u8; REPORT_LEN] {
@@ -206,11 +206,11 @@ mod tests {
 
     #[test]
     fn polling_rate_request_arguments() {
-        let request = RazerRequest::polling_rate(0x06, 0x08);
+        let request = RazerRequest::polling_rate(PollingRate::Hz125);
         let report = request.encode();
 
         assert_eq!(report[0], STATUS_NEW);
-        assert_eq!(report[1], 0x06);
+        assert_eq!(report[1], 0x1f);
         assert_eq!(report[5], 0x02);
         assert_eq!(report[6], 0x00);
         assert_eq!(report[7], 0x8e);
@@ -220,7 +220,7 @@ mod tests {
 
     #[test]
     fn polling_rate_request_crc() {
-        let request = RazerRequest::polling_rate(0x06, 0x08);
+        let request = RazerRequest::polling_rate(PollingRate::Hz125);
         let report = request.encode();
 
         assert_eq!(report[88], calculate_crc(&report));

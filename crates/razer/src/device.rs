@@ -113,18 +113,12 @@ impl RazerDevice {
     }
 
     pub(crate) fn set_polling_rate(&mut self, rate: PollingRate) -> Result<(), RazerError> {
-        let transaction_id = self.next_transaction_id();
-
-        let request = RazerRequest::polling_rate(transaction_id, rate.protocol_value());
+        let request = RazerRequest::polling_rate(rate);
 
         let response = self.execute(request)?;
 
-        if response.argument(0) != Some(0x01) {
-            return Err(RazerError::InvalidArgument(0));
-        }
-
-        if response.argument(1) != Some(rate.protocol_value()) {
-            return Err(RazerError::InvalidArgument(1));
+        if !response.is_success() {
+            return Err(RazerError::UnexpectedStatus(response.status));
         }
 
         Ok(())
