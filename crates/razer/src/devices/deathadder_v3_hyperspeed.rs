@@ -80,6 +80,10 @@ impl DaV3HS {
         self.device.set_polling_rate(rate)
     }
 
+    pub fn get_polling_rate(&mut self) -> Result<PollingRate, RazerError> {
+        self.device.get_polling_rate()
+    }
+
     pub fn battery(&mut self) -> Result<Battery, RazerError> {
         self.device.battery()
     }

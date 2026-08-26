@@ -43,4 +43,6 @@ pub enum RazerError {
     Timeout,
 
     #[error("invalid argument index: {0}")] InvalidArgument(usize),
+
+    #[error("unknown polling rate value: {0:#04x}")] UnknownPollingRate(u8),
 }

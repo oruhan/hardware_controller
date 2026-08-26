@@ -112,8 +112,9 @@ impl RazerDevice {
         Err(RazerError::Timeout)
     }
 
-    pub(crate) fn set_polling_rate(&mut self, rate: PollingRate) -> Result<(), RazerError> {
-        let request = RazerRequest::polling_rate(rate);
+    pub fn set_polling_rate(&mut self, rate: PollingRate) -> Result<(), RazerError> {
+        let transaction_id = self.next_transaction_id();
+        let request = RazerRequest::set_polling_rate(transaction_id, rate);
 
         let response = self.execute(request)?;
 
@@ -122,6 +123,14 @@ impl RazerDevice {
         }
 
         Ok(())
+    }
+
+    pub fn get_polling_rate(&mut self) -> Result<PollingRate, RazerError> {
+        let transaction_id = self.next_transaction_id();
+        let request = RazerRequest::get_polling_rate(transaction_id);
+        let response = self.execute(request)?;
+        let raw = response.argument(1).ok_or(RazerError::InvalidArgument(1))?;
+        PollingRate::from_protocol_value(raw).ok_or(RazerError::UnknownPollingRate(raw))
     }
 
     fn query_battery_level(&mut self) -> Result<u8, RazerError> {

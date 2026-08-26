@@ -2,12 +2,12 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use std::sync::atomic::{ AtomicU64, Ordering };
+use std::sync::{ Arc, Mutex };
 use std::time::Duration;
 
-use devices::{ BatteryStatus, ChargingState, ConnectionType, DeviceKind, catalog };
+use devices::{ BatteryStatus, ChargingState, ConnectionType, DeviceKind, PollingRate, catalog };
 use xengui::{ *, task::{ spawn, spawn_blocking } };
 use xenframe::{ App, AppConfig, WindowPosition };
-
 use xengui_icons::codepoints;
 
 fn battery_color(pct: u8) -> Color {
@@ -33,6 +33,11 @@ struct DeviceEntry {
     connected: bool,
     battery: Option<BatteryStatus>,
     error: Option<String>,
+    supports_polling_rate: bool,
+    polling_rate: Option<PollingRate>,
+    // True while a set_polling_rate call is in flight, for UI feedback.
+    applying_rate: bool,
+    pending_rate: Arc<Mutex<Option<PollingRate>>>,
 }
 
 fn next_device_id() -> u64 {
@@ -48,18 +53,26 @@ fn add_device(
     set_selected: SetState<Option<u64>>
 ) {
     let id = next_device_id();
+    let pending_rate: Arc<Mutex<Option<PollingRate>>> = Arc::new(Mutex::new(None));
 
-    set_devices.update(move |list| {
-        list.push(DeviceEntry {
-            id,
-            brand: descriptor.brand.to_string(),
-            model: descriptor.model.to_string(),
-            kind: descriptor.kind,
-            image_svg: descriptor.image_svg,
-            connected: false,
-            battery: None,
-            error: None,
-        });
+    set_devices.update({
+        let pending_rate = pending_rate.clone();
+        move |list| {
+            list.push(DeviceEntry {
+                id,
+                brand: descriptor.brand.to_string(),
+                model: descriptor.model.to_string(),
+                kind: descriptor.kind,
+                image_svg: descriptor.image_svg,
+                connected: false,
+                battery: None,
+                error: None,
+                supports_polling_rate: false,
+                polling_rate: None,
+                pending_rate,
+                applying_rate: false,
+            });
+        }
     });
     set_selected.set(Some(id));
 
@@ -69,10 +82,25 @@ fn add_device(
 
             let mut device = match opened {
                 Ok(device) => {
+                    let mut device = device;
+                    let supports_rate = device.supports_polling_rate();
+
+                    let (returned, initial_rate) = spawn_blocking(move || {
+                        let rate = if supports_rate {
+                            device.get_polling_rate().ok()
+                        } else {
+                            None
+                        };
+                        (device, rate)
+                    }).await;
+                    device = returned;
+
                     set_devices.update(move |list| {
                         if let Some(entry) = list.iter_mut().find(|e| e.id == id) {
                             entry.connected = true;
                             entry.error = None;
+                            entry.supports_polling_rate = supports_rate;
+                            entry.polling_rate = initial_rate;
                         }
                     });
                     device
@@ -90,6 +118,31 @@ fn add_device(
             };
 
             loop {
+                let requested_rate = pending_rate.lock().unwrap().take();
+                if let Some(rate) = requested_rate {
+                    let (returned, set_result) = spawn_blocking(move || {
+                        let result = device.set_polling_rate(rate);
+                        (device, result)
+                    }).await;
+                    device = returned;
+
+                    let outcome = set_result.map_err(|e| e.to_string());
+                    set_devices.update(move |list| {
+                        if let Some(entry) = list.iter_mut().find(|e| e.id == id) {
+                            entry.applying_rate = false;
+                            match &outcome {
+                                Ok(()) => {
+                                    entry.polling_rate = Some(rate);
+                                    entry.error = None;
+                                }
+                                Err(msg) => {
+                                    entry.error = Some(msg.clone());
+                                }
+                            }
+                        }
+                    });
+                }
+
                 let (returned, result) = spawn_blocking(move || {
                     let result = device.poll_battery();
                     (device, result)
@@ -117,7 +170,15 @@ fn add_device(
                     }
                 }
 
-                spawn_blocking(|| std::thread::sleep(Duration::from_millis(1000))).await;
+                // Slept in small chunks so a polling-rate change requested
+                // from the UI is picked up quickly instead of waiting for
+                // the full poll interval.
+                for _ in 0..10 {
+                    spawn_blocking(|| std::thread::sleep(Duration::from_millis(100))).await;
+                    if pending_rate.lock().unwrap().is_some() {
+                        break;
+                    }
+                }
             }
 
             spawn_blocking(|| std::thread::sleep(Duration::from_secs(1))).await;
@@ -462,7 +523,80 @@ fn status_card(entry: &DeviceEntry) -> View {
     card
 }
 
-fn detail_panel(entry: Option<&DeviceEntry>, breathe_phase: f32) -> View {
+fn polling_rate_card(entry: &DeviceEntry, set_devices: SetState<Vec<DeviceEntry>>) -> View {
+    let theme = current_theme();
+    let rates = [
+        (PollingRate::Hz125, "125 Hz"),
+        (PollingRate::Hz500, "500 Hz"),
+        (PollingRate::Hz1000, "1000 Hz"),
+    ];
+
+    let applying = entry.applying_rate;
+    let mut row = Row::new().width(pct!(100.0)).gap(8.0, 0.0);
+
+    for (rate, label) in rates {
+        let selected = entry.polling_rate == Some(rate);
+        let (bg, fg) = if selected {
+            (theme.secondary_container, theme.on_secondary_container)
+        } else {
+            (theme.surface_container_high, theme.on_surface_variant)
+        };
+        let entry_id = entry.id;
+        let pending_rate = entry.pending_rate.clone();
+        let set_devices = set_devices.clone();
+
+        row = row.child(
+            Button::new()
+                .label(if applying && selected { "..." } else { label })
+                .flex_grow(1.0)
+                .justify_content(JustifyContent::Center)
+                .padding(Edges::symmetric(0.0, 10.0))
+                .background(bg)
+                .color(fg)
+                .border(Border::all(0, Color::TRANSPARENT).radius(theme.radius_lg))
+                .cursor(Cursor::Pointer)
+                .enabled(!applying)
+                .on_click(move |_ctx| {
+                    *pending_rate.lock().unwrap() = Some(rate);
+                    // Reflected immediately, before the background task
+                    // even picks the request up, so the click never feels
+                    // like it did nothing.
+                    set_devices.update(move |list| {
+                        if let Some(entry) = list.iter_mut().find(|e| e.id == entry_id) {
+                            entry.applying_rate = true;
+                        }
+                    });
+                })
+        );
+    }
+
+    let mut card = m3_card()
+        .width(pct!(100.0))
+        .gap(0.0, 10.0)
+        .padding(Edges::all(20.0))
+        .child(
+            Label::new()
+                .label("Polling Rate")
+                .font_size(14)
+                .font_weight(FontWeight::SemiBold)
+                .color(theme.on_surface)
+        )
+        .child(row);
+
+    if applying {
+        card = card.child(
+            Label::new().label("Uygulanıyor...").font_size(12).color(theme.on_surface_variant)
+        );
+    }
+
+    card
+}
+
+fn detail_panel(
+    entry: Option<&DeviceEntry>,
+    breathe_phase: f32,
+    set_devices: SetState<Vec<DeviceEntry>>
+) -> View {
     let theme = current_theme();
 
     let Some(entry) = entry else {
@@ -478,37 +612,43 @@ fn detail_panel(entry: Option<&DeviceEntry>, breathe_phase: f32) -> View {
             );
     };
 
+    let mut column = Column::new()
+        .width(pct!(100.0))
+        .max_width(560)
+        .gap(0.0, 20.0)
+        .margin(Edges::only(0, 0, 0, 32))
+        .child(
+            Column::new()
+                .gap(0.0, 4.0)
+                .child(
+                    Label::new()
+                        .label(entry.brand.clone())
+                        .font_size(14)
+                        .color(theme.on_surface_variant)
+                )
+                .child(
+                    Label::new()
+                        .label(entry.model.clone())
+                        .font_size(24)
+                        .font_weight(FontWeight::SemiBold)
+                        .color(theme.on_surface)
+                )
+        )
+        .child(device_illustration(entry, breathe_phase))
+        .child(battery_card(entry.battery))
+        .child(status_card(entry));
+
+    if entry.supports_polling_rate {
+        column = column.child(polling_rate_card(entry, set_devices));
+    }
+
     Column::new()
         .flex_grow(1.0)
+        .width(pct!(100.0))
         .height(pct!(100.0))
         .overflow_y(Overflow::Auto)
         .padding(Edges::all(28.0))
-        .child(
-            Column::new()
-                .width(pct!(100.0))
-                .max_width(560)
-                .gap(0.0, 20.0)
-                .child(
-                    Column::new()
-                        .gap(0.0, 4.0)
-                        .child(
-                            Label::new()
-                                .label(entry.brand.clone())
-                                .font_size(14)
-                                .color(theme.on_surface_variant)
-                        )
-                        .child(
-                            Label::new()
-                                .label(entry.model.clone())
-                                .font_size(24)
-                                .font_weight(FontWeight::SemiBold)
-                                .color(theme.on_surface)
-                        )
-                )
-                .child(device_illustration(entry, breathe_phase))
-                .child(battery_card(entry.battery))
-                .child(status_card(entry))
-        )
+        .child(column)
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -557,7 +697,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         set_picker_open.clone()
                     )
                 )
-                .child(detail_panel(selected_entry, breathe_phase))
+                .child(detail_panel(selected_entry, breathe_phase, set_devices.clone()))
         )
     });
 

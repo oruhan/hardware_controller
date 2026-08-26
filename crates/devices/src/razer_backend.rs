@@ -37,6 +37,18 @@ impl Device for DeathAdderV3HyperSpeed {
             connection,
         })
     }
+
+    fn supports_polling_rate(&self) -> bool {
+        true
+    }
+
+    fn get_polling_rate(&mut self) -> Result<crate::PollingRate, DeviceError> {
+        self.0.get_polling_rate().map_err(|e| DeviceError(e.to_string()))
+    }
+
+    fn set_polling_rate(&mut self, rate: crate::PollingRate) -> Result<(), DeviceError> {
+        self.0.set_polling_rate(rate).map_err(|e| DeviceError(e.to_string()))
+    }
 }
 
 fn open_deathadder_v3_hyperspeed() -> Result<Box<dyn Device>, DeviceError> {

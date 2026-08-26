@@ -3,6 +3,8 @@ mod razer_backend;
 
 use std::fmt;
 
+pub use razer::PollingRate;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DeviceKind {
     Mouse,
@@ -48,6 +50,18 @@ impl std::error::Error for DeviceError {}
 
 pub trait Device: Send {
     fn poll_battery(&mut self) -> Result<BatteryStatus, DeviceError>;
+
+    fn supports_polling_rate(&self) -> bool {
+        false
+    }
+
+    fn get_polling_rate(&mut self) -> Result<PollingRate, DeviceError> {
+        Err(DeviceError("this device does not support polling rate control".to_string()))
+    }
+
+    fn set_polling_rate(&mut self, _rate: PollingRate) -> Result<(), DeviceError> {
+        Err(DeviceError("this device does not support polling rate control".to_string()))
+    }
 }
 
 pub struct DeviceDescriptor {
