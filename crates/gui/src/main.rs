@@ -7,15 +7,7 @@ use std::sync::atomic::{ AtomicBool, AtomicU64, Ordering };
 use std::sync::{ Arc, Mutex };
 use std::time::Duration;
 
-use devices::{
-    BatteryStatus,
-    ChargingState,
-    ConnectionType,
-    Device,
-    DeviceKind,
-    PollingRate,
-    catalog,
-};
+use devices::{ BatteryStatus, ChargingState, ConnectionType, DeviceKind, PollingRate, catalog };
 use serde::{ Deserialize, Serialize };
 use xengui::{ *, task::{ spawn, spawn_blocking } };
 use xenframe::{ App, AppConfig, WindowPosition };
@@ -370,6 +362,8 @@ fn device_list_item(
         (Color::TRANSPARENT, theme.on_surface_variant)
     };
 
+    let row_select = set_selected.clone();
+
     Row::new()
         .width(pct!(100.0))
         .align_items(Align::Center)
@@ -379,7 +373,7 @@ fn device_list_item(
         .hover_background(theme.surface_container_high.with_alpha_f32(0.6))
         .border(Border::all(0, Color::TRANSPARENT).radius(theme.radius_lg))
         .cursor(Cursor::Pointer)
-        .on_click(move |_ctx| set_selected.set(Some(id)))
+        .on_click(move |_ctx| row_select.set(Some(id)))
         .child(VariableIcon::new(kind_icon(entry.kind)).size(22.0).color(fg))
         .child(
             Column::new()
@@ -509,22 +503,30 @@ fn add_device_modal(
 
     let close_via_scrim = set_picker_open.clone();
 
-    Portal::new().child(
-        View::new()
-            .key("add_device_modal_scrim")
-            .position(Position::Fixed)
-            .top(0.0)
-            .left(0.0)
-            .size(Length::vw(100.0), Length::vh(100.0))
-            .display(if picker_open { Display::Flex } else { Display::None })
-            .align_items(Align::Center)
-            .justify_content(JustifyContent::Center)
-            .background(if picker_open { Color::BLACK.with_alpha(140) } else { Color::TRANSPARENT })
-            .transition_all(Transition::new(Duration::from_millis(180)).easing(Easing::EaseOut))
-            .scale(if picker_open { 1.0 } else { 0.001 })
-            .on_click(move |_ctx| close_via_scrim.set(false))
-            .child(dialog)
-    )
+    Portal::new()
+        .size(0.0, 0.0)
+        .child(
+            View::new()
+                .key("add_device_modal_scrim")
+                .position(Position::Fixed)
+                .top(0.0)
+                .left(0.0)
+                .size(Length::vw(100.0), Length::vh(100.0))
+                .display(if picker_open { Display::Flex } else { Display::None })
+                .align_items(Align::Center)
+                .justify_content(JustifyContent::Center)
+                .background(
+                    if picker_open {
+                        Color::BLACK.with_alpha(140)
+                    } else {
+                        Color::TRANSPARENT
+                    }
+                )
+                .transition_all(Transition::new(Duration::from_millis(180)).easing(Easing::EaseOut))
+                .scale(if picker_open { 1.0 } else { 0.001 })
+                .on_click(move |_ctx| close_via_scrim.set(false))
+                .child(dialog)
+        )
 }
 
 fn sidebar(
