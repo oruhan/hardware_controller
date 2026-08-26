@@ -9,3 +9,5 @@ xengui-icons.workspace = true
 xenframe.workspace = true
 razer.workspace = true
 devices.workspace = true
+serde.workspace = true
+toml.workspace = true

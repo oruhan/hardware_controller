@@ -414,7 +414,7 @@ fn device_picker_row(
     set_devices: SetState<Vec<DeviceEntry>>,
     set_selected: SetState<Option<u64>>,
     set_picker_open: SetState<bool>
-) -> View {
+) -> Row {
     let theme = current_theme();
     Row::new()
         .width(pct!(100.0))
