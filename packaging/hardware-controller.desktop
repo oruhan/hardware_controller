@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=Hardware Controller
+Comment=Razer peripheral telemetry and control
+Exec=hardware-controller
+Icon=hardware-controller
+Terminal=false
+Categories=Settings;HardwareSettings;
+Keywords=Razer;mouse;battery;polling;

@@ -1,9 +1,17 @@
 [package]
 name = "razer"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Safe HID protocol support for selected Razer peripherals"
+
+[lints]
+workspace = true
 
 [dependencies]
-hidapi.workspace = true
 thiserror.workspace = true
-windows.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+hidapi = { version = "2.6.6", default-features = false, features = ["linux-native-basic-udev"] }

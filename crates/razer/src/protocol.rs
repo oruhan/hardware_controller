@@ -83,12 +83,12 @@ impl RazerCommand {
 
     pub const POLLING_RATE_SET: Self = Self {
         class: 0x00,
-        id: 0x0e,
+        id: 0x05,
     };
 
     pub const POLLING_RATE_GET: Self = Self {
         class: 0x00,
-        id: 0x8e,
+        id: 0x85,
     };
 }
 
@@ -167,13 +167,12 @@ impl RazerRequest {
     }
 
     pub(crate) fn set_polling_rate(transaction_id: u8, rate: PollingRate) -> Self {
-        Self::new(transaction_id, RazerCommand::POLLING_RATE_SET).with_arguments(
-            &[0x01, rate.protocol_value()]
-        )
+        Self::new(transaction_id, RazerCommand::POLLING_RATE_SET)
+            .with_arguments(&[rate.protocol_value()])
     }
 
     pub(crate) fn get_polling_rate(transaction_id: u8) -> Self {
-        Self::new(transaction_id, RazerCommand::POLLING_RATE_GET).with_arguments(&[0x01, 0x00])
+        Self::new(transaction_id, RazerCommand::POLLING_RATE_GET).with_arguments(&[0x00])
     }
 
     pub(crate) fn encode(&self) -> [u8; REPORT_LEN] {
@@ -217,11 +216,10 @@ mod tests {
 
         assert_eq!(report[0], STATUS_NEW);
         assert_eq!(report[1], 0x1f);
-        assert_eq!(report[5], 0x02);
+        assert_eq!(report[5], 0x01);
         assert_eq!(report[6], 0x00);
-        assert_eq!(report[7], 0x0e);
-        assert_eq!(report[8], 0x01);
-        assert_eq!(report[9], 0x08);
+        assert_eq!(report[7], 0x05);
+        assert_eq!(report[8], 0x08);
     }
 
     #[test]
@@ -238,16 +236,25 @@ mod tests {
         let report = request.encode();
 
         assert_eq!(report[6], 0x00);
-        assert_eq!(report[7], 0x8e);
-        assert_eq!(report[8], 0x01);
-        assert_eq!(report[9], 0x00);
+        assert_eq!(report[5], 0x01);
+        assert_eq!(report[7], 0x85);
+        assert_eq!(report[8], 0x00);
     }
 
     #[test]
     fn polling_rate_from_protocol_value_roundtrip() {
-        assert_eq!(PollingRate::from_protocol_value(0x08), Some(PollingRate::Hz125));
-        assert_eq!(PollingRate::from_protocol_value(0x02), Some(PollingRate::Hz500));
-        assert_eq!(PollingRate::from_protocol_value(0x01), Some(PollingRate::Hz1000));
+        assert_eq!(
+            PollingRate::from_protocol_value(0x08),
+            Some(PollingRate::Hz125)
+        );
+        assert_eq!(
+            PollingRate::from_protocol_value(0x02),
+            Some(PollingRate::Hz500)
+        );
+        assert_eq!(
+            PollingRate::from_protocol_value(0x01),
+            Some(PollingRate::Hz1000)
+        );
         assert_eq!(PollingRate::from_protocol_value(0xff), None);
     }
 }

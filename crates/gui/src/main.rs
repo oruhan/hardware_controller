@@ -1,20 +1,27 @@
 // SPDX-License-Identifier: Apache-2.0
-#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
-
 use std::fs;
 use std::path::PathBuf;
-use std::sync::atomic::{ AtomicBool, AtomicU64, Ordering };
-use std::sync::{ Arc, Mutex };
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use devices::{ BatteryStatus, ChargingState, ConnectionType, DeviceKind, PollingRate, catalog };
-use serde::{ Deserialize, Serialize };
-use xengui::{ *, task::{ spawn, spawn_blocking } };
-use xenframe::{ App, AppConfig, WindowPosition };
+use devices::{BatteryStatus, ChargingState, ConnectionType, DeviceKind, PollingRate, catalog};
+use serde::{Deserialize, Serialize};
+use xenframe::{App, AppConfig, WindowPosition};
+use xengui::{
+    task::{spawn, spawn_blocking},
+    *,
+};
 use xengui_icons::codepoints;
 
 fn battery_color(pct: u8) -> Color {
-    if pct <= 20 { Color::RED_500 } else if pct <= 50 { Color::AMBER_500 } else { Color::GREEN_500 }
+    if pct <= 20 {
+        Color::RED_500
+    } else if pct <= 50 {
+        Color::AMBER_500
+    } else {
+        Color::GREEN_500
+    }
 }
 
 fn kind_icon(kind: DeviceKind) -> char {
@@ -44,6 +51,7 @@ struct DeviceEntry {
     applying_rate: bool,
     pending_rate: Arc<Mutex<Option<PollingRate>>>,
     refresh_requested: Arc<AtomicBool>,
+    active: Arc<AtomicBool>,
 }
 
 fn next_device_id() -> u64 {
@@ -63,20 +71,28 @@ fn device_key(brand: &str, model: &str) -> String {
 }
 
 fn config_path() -> PathBuf {
-    std::env
-        ::current_exe()
-        .ok()
-        .and_then(|p| p.parent().map(|dir| dir.join("devices.toml")))
-        .unwrap_or_else(|| PathBuf::from("devices.toml"))
+    if let Some(path) = std::env::var_os("XDG_CONFIG_HOME").filter(|value| !value.is_empty()) {
+        return PathBuf::from(path).join("hardware-controller/devices.toml");
+    }
+
+    if let Some(home) = std::env::var_os("HOME").filter(|value| !value.is_empty()) {
+        return PathBuf::from(home).join(".config/hardware-controller/devices.toml");
+    }
+
+    PathBuf::from("devices.toml")
 }
 
 fn load_persisted_keys() -> Vec<String> {
     let Ok(text) = fs::read_to_string(config_path()) else {
         return Vec::new();
     };
-    toml::from_str::<DeviceConfig>(&text)
-        .map(|c| c.devices)
-        .unwrap_or_default()
+    match toml::from_str::<DeviceConfig>(&text) {
+        Ok(config) => config.devices,
+        Err(error) => {
+            eprintln!("failed to read the configuration file: {error}");
+            Vec::new()
+        }
+    }
 }
 
 fn save_persisted_devices(devices: &[DeviceEntry]) {
@@ -86,8 +102,19 @@ fn save_persisted_devices(devices: &[DeviceEntry]) {
             .map(|d| device_key(&d.brand, &d.model))
             .collect(),
     };
-    if let Ok(text) = toml::to_string_pretty(&config) {
-        let _ = fs::write(config_path(), text);
+    let result = (|| -> Result<(), Box<dyn std::error::Error>> {
+        let path = config_path();
+        if let Some(parent) = path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        let temporary = path.with_extension("toml.tmp");
+        fs::write(&temporary, toml::to_string_pretty(&config)?)?;
+        fs::rename(temporary, path)?;
+        Ok(())
+    })();
+
+    if let Err(error) = result {
+        eprintln!("failed to save the configuration file: {error}");
     }
 }
 
@@ -97,15 +124,17 @@ fn add_device(
     descriptor: &'static devices::DeviceDescriptor,
     set_devices: SetState<Vec<DeviceEntry>>,
     set_selected: SetState<Option<u64>>,
-    select_on_add: bool
+    select_on_add: bool,
 ) {
     let id = next_device_id();
     let pending_rate: Arc<Mutex<Option<PollingRate>>> = Arc::new(Mutex::new(None));
     let refresh_requested = Arc::new(AtomicBool::new(false));
+    let active = Arc::new(AtomicBool::new(true));
 
     set_devices.update({
         let pending_rate = pending_rate.clone();
         let refresh_requested = refresh_requested.clone();
+        let active = active.clone();
         move |list| {
             list.push(DeviceEntry {
                 id,
@@ -122,6 +151,7 @@ fn add_device(
                 pending_rate,
                 applying_rate: false,
                 refresh_requested,
+                active,
             });
             save_persisted_devices(list);
         }
@@ -132,8 +162,12 @@ fn add_device(
     }
 
     spawn(async move {
-        loop {
+        while active.load(Ordering::Acquire) {
             let opened = spawn_blocking(descriptor.open).await;
+
+            if !active.load(Ordering::Acquire) {
+                break;
+            }
 
             // The connect attempt resolved one way or another - the
             // skeleton placeholder can give way to the real row now.
@@ -155,7 +189,8 @@ fn add_device(
                             None
                         };
                         (device, rate)
-                    }).await;
+                    })
+                    .await;
                     device = returned;
 
                     set_devices.update(move |list| {
@@ -180,13 +215,14 @@ fn add_device(
                 }
             };
 
-            loop {
-                let requested_rate = pending_rate.lock().unwrap().take();
+            while active.load(Ordering::Acquire) {
+                let requested_rate = pending_rate.lock().ok().and_then(|mut rate| rate.take());
                 if let Some(rate) = requested_rate {
                     let (returned, set_result) = spawn_blocking(move || {
                         let result = device.set_polling_rate(rate);
                         (device, result)
-                    }).await;
+                    })
+                    .await;
                     device = returned;
 
                     let outcome = set_result.map_err(|e| e.to_string());
@@ -209,7 +245,8 @@ fn add_device(
                 let (returned, result) = spawn_blocking(move || {
                     let result = device.poll_battery();
                     (device, result)
-                }).await;
+                })
+                .await;
                 device = returned;
 
                 match result {
@@ -235,9 +272,14 @@ fn add_device(
 
                 // Wakes up early for a rate change or a manual refresh
                 // instead of always waiting out the full poll interval.
-                for _ in 0..10 {
+                // Normal telemetry runs every five seconds. Rate changes and
+                // manual refreshes can still wake the loop within 100 ms.
+                for _ in 0..50 {
                     spawn_blocking(|| std::thread::sleep(Duration::from_millis(100))).await;
-                    if pending_rate.lock().unwrap().is_some() {
+                    if !active.load(Ordering::Acquire) {
+                        break;
+                    }
+                    if pending_rate.lock().is_ok_and(|rate| rate.is_some()) {
                         break;
                     }
                     if refresh_requested.swap(false, Ordering::SeqCst) {
@@ -258,7 +300,12 @@ fn m3_card() -> View {
         .flex_direction(FlexDirection::Column)
         .background(theme.surface_container_low)
         .border(Border::all(0, Color::TRANSPARENT).radius(theme.radius_xl))
-        .box_shadow(BoxShadow::new(0.0, 1.0, 3.0, Color::NEUTRAL_950.with_alpha(20)))
+        .box_shadow(BoxShadow::new(
+            0.0,
+            1.0,
+            3.0,
+            Color::NEUTRAL_950.with_alpha(20),
+        ))
 }
 
 fn device_skeleton_row(phase: f32) -> View {
@@ -278,7 +325,7 @@ fn device_skeleton_row(phase: f32) -> View {
                 .width(22.0)
                 .height(22.0)
                 .background(fill)
-                .border(Border::all(0, Color::TRANSPARENT).radius(6.0))
+                .border(Border::all(0, Color::TRANSPARENT).radius(6.0)),
         )
         .child(
             Column::new()
@@ -289,15 +336,15 @@ fn device_skeleton_row(phase: f32) -> View {
                         .width(70.0)
                         .height(10.0)
                         .background(fill)
-                        .border(Border::all(0, Color::TRANSPARENT).radius(3.0))
+                        .border(Border::all(0, Color::TRANSPARENT).radius(3.0)),
                 )
                 .child(
                     View::new()
                         .width(140.0)
                         .height(12.0)
                         .background(fill)
-                        .border(Border::all(0, Color::TRANSPARENT).radius(3.0))
-                )
+                        .border(Border::all(0, Color::TRANSPARENT).radius(3.0)),
+                ),
         )
 }
 
@@ -315,13 +362,17 @@ fn refresh_button(refresh_requested: Arc<AtomicBool>) -> View {
         .on_click(move |_ctx| {
             refresh_requested.store(true, Ordering::SeqCst);
         })
-        .child(VariableIcon::new(codepoints::REFRESH).size(18.0).color(theme.on_surface_variant))
+        .child(
+            VariableIcon::new(codepoints::REFRESH)
+                .size(18.0)
+                .color(theme.on_surface_variant),
+        )
 }
 
 fn delete_button(
     entry_id: u64,
     set_devices: SetState<Vec<DeviceEntry>>,
-    set_selected: SetState<Option<u64>>
+    set_selected: SetState<Option<u64>>,
 ) -> View {
     let theme = current_theme();
     View::new()
@@ -335,6 +386,9 @@ fn delete_button(
         .transition_colors(Transition::new(Duration::from_millis(120)))
         .on_click(move |_ctx| {
             set_devices.update(move |list| {
+                if let Some(entry) = list.iter().find(|entry| entry.id == entry_id) {
+                    entry.active.store(false, Ordering::Release);
+                }
                 list.retain(|e| e.id != entry_id);
                 save_persisted_devices(list);
             });
@@ -344,14 +398,18 @@ fn delete_button(
                 }
             });
         })
-        .child(VariableIcon::new(codepoints::DELETE).size(16.0).color(theme.on_surface_variant))
+        .child(
+            VariableIcon::new(codepoints::DELETE)
+                .size(16.0)
+                .color(theme.on_surface_variant),
+        )
 }
 
 fn device_list_item(
     entry: &DeviceEntry,
     selected: bool,
     set_selected: SetState<Option<u64>>,
-    set_devices: SetState<Vec<DeviceEntry>>
+    set_devices: SetState<Vec<DeviceEntry>>,
 ) -> View {
     let theme = current_theme();
     let id = entry.id;
@@ -374,7 +432,11 @@ fn device_list_item(
         .border(Border::all(0, Color::TRANSPARENT).radius(theme.radius_lg))
         .cursor(Cursor::Pointer)
         .on_click(move |_ctx| row_select.set(Some(id)))
-        .child(VariableIcon::new(kind_icon(entry.kind)).size(22.0).color(fg))
+        .child(
+            VariableIcon::new(kind_icon(entry.kind))
+                .size(22.0)
+                .color(fg),
+        )
         .child(
             Column::new()
                 .gap(0.0, 2.0)
@@ -383,22 +445,30 @@ fn device_list_item(
                     Label::new()
                         .label(entry.brand.clone())
                         .font_size(12)
-                        .color(if selected { fg } else { theme.on_surface_variant })
+                        .color(if selected {
+                            fg
+                        } else {
+                            theme.on_surface_variant
+                        }),
                 )
                 .child(
                     Label::new()
                         .label(entry.model.clone())
                         .font_size(14)
                         .font_weight(FontWeight::Medium)
-                        .color(if selected { fg } else { theme.on_surface })
-                )
+                        .color(if selected { fg } else { theme.on_surface }),
+                ),
         )
         .child(
             View::new()
                 .width(8)
                 .height(8)
-                .background(if entry.connected { Color::GREEN_500 } else { theme.outline_variant })
-                .border(Border::all(0, Color::TRANSPARENT).radius(64))
+                .background(if entry.connected {
+                    Color::GREEN_500
+                } else {
+                    theme.outline_variant
+                })
+                .border(Border::all(0, Color::TRANSPARENT).radius(64)),
         )
         .child(delete_button(id, set_devices, set_selected))
 }
@@ -407,7 +477,7 @@ fn device_picker_row(
     descriptor: &'static devices::DeviceDescriptor,
     set_devices: SetState<Vec<DeviceEntry>>,
     set_selected: SetState<Option<u64>>,
-    set_picker_open: SetState<bool>
+    set_picker_open: SetState<bool>,
 ) -> View {
     let theme = current_theme();
     Row::new()
@@ -423,52 +493,58 @@ fn device_picker_row(
             set_picker_open.set(false);
         })
         .child(
-            VariableIcon::new(kind_icon(descriptor.kind)).size(20.0).color(theme.on_surface_variant)
+            VariableIcon::new(kind_icon(descriptor.kind))
+                .size(20.0)
+                .color(theme.on_surface_variant),
         )
         .child(
             Label::new()
                 .label(format!("{} {}", descriptor.brand, descriptor.model))
                 .font_size(14)
-                .color(theme.on_surface)
+                .color(theme.on_surface),
         )
 }
 
-// A persistently-mounted Portal overlay: `display` toggles instantly for
-// correct hit-testing (a hidden dialog must never swallow clicks), while
-// `scale` keeps animating smoothly across that toggle because the widget
-// itself never unmounts - only its own internal state changes.
 fn add_device_modal(
-    picker_open: bool,
+    entered: bool,
     set_picker_open: SetState<bool>,
     set_devices: SetState<Vec<DeviceEntry>>,
-    set_selected: SetState<Option<u64>>
-) -> Portal {
+    set_selected: SetState<Option<u64>>,
+) -> View {
     let theme = current_theme();
 
     let mut list_column = Column::new().gap(0.0, 2.0);
     for descriptor in catalog() {
-        list_column = list_column.child(
-            device_picker_row(
-                descriptor,
-                set_devices.clone(),
-                set_selected.clone(),
-                set_picker_open.clone()
-            )
-        );
+        list_column = list_column.child(device_picker_row(
+            descriptor,
+            set_devices.clone(),
+            set_selected.clone(),
+            set_picker_open.clone(),
+        ));
     }
 
     let close_via_header = set_picker_open.clone();
 
     let dialog = View::new()
+        .key("add_device_dialog")
         .display(Display::Flex)
         .flex_direction(FlexDirection::Column)
+        .z_index(101)
         .width(360.0)
         .max_width(pct!(90.0))
         .padding(Edges::all(20.0))
         .gap(0.0, 16.0)
         .background(theme.surface_container_high)
         .border(Border::all(0, Color::TRANSPARENT).radius(theme.radius_2xl))
-        .box_shadow(BoxShadow::new(0.0, 12.0, 32.0, Color::BLACK.with_alpha(140)))
+        .box_shadow(BoxShadow::new(
+            0.0,
+            12.0,
+            32.0,
+            Color::BLACK.with_alpha(140),
+        ))
+        .scale(if entered { 1.0 } else { 0.94 })
+        .content_scale(if entered { 1.0 } else { 0.94 })
+        .transition_transform(Transition::new(Duration::from_millis(180)).easing(Easing::EaseOut))
         .on_click(|_ctx| {})
         .child(
             Row::new()
@@ -476,11 +552,11 @@ fn add_device_modal(
                 .justify_content(JustifyContent::SpaceBetween)
                 .child(
                     Label::new()
-                        .label("CİHAZ EKLE")
+                        .label("Add device")
                         .font_size(14)
                         .font_weight(FontWeight::SemiBold)
                         .letter_spacing(1.2)
-                        .color(theme.on_surface)
+                        .color(theme.on_surface),
                 )
                 .child(
                     View::new()
@@ -495,38 +571,42 @@ fn add_device_modal(
                         .child(
                             VariableIcon::new(codepoints::CLOSE)
                                 .size(16.0)
-                                .color(theme.on_surface_variant)
-                        )
-                )
+                                .color(theme.on_surface_variant),
+                        ),
+                ),
         )
         .child(list_column);
 
     let close_via_scrim = set_picker_open.clone();
 
-    Portal::new()
-        .size(0.0, 0.0)
+    View::new()
+        .key("add_device_modal")
+        .position(Position::Fixed)
+        .z_index(100)
+        .top(0.0)
+        .left(0.0)
+        .size(Length::vw(100.0), Length::vh(100.0))
+        .align_items(Align::Center)
+        .justify_content(JustifyContent::Center)
         .child(
             View::new()
                 .key("add_device_modal_scrim")
-                .position(Position::Fixed)
+                .position(Position::Absolute)
+                .z_index(100)
                 .top(0.0)
                 .left(0.0)
                 .size(Length::vw(100.0), Length::vh(100.0))
-                .display(if picker_open { Display::Flex } else { Display::None })
-                .align_items(Align::Center)
-                .justify_content(JustifyContent::Center)
-                .background(
-                    if picker_open {
-                        Color::BLACK.with_alpha(140)
-                    } else {
-                        Color::TRANSPARENT
-                    }
+                .background(if entered {
+                    Color::BLACK.with_alpha(140)
+                } else {
+                    Color::TRANSPARENT
+                })
+                .transition_colors(
+                    Transition::new(Duration::from_millis(180)).easing(Easing::EaseOut),
                 )
-                .transition_all(Transition::new(Duration::from_millis(180)).easing(Easing::EaseOut))
-                .scale(if picker_open { 1.0 } else { 0.001 })
-                .on_click(move |_ctx| close_via_scrim.set(false))
-                .child(dialog)
+                .on_click(move |_ctx| close_via_scrim.set(false)),
         )
+        .child(dialog)
 }
 
 fn sidebar(
@@ -536,7 +616,7 @@ fn sidebar(
     set_devices: SetState<Vec<DeviceEntry>>,
     picker_open: bool,
     set_picker_open: SetState<bool>,
-    shimmer_phase: f32
+    shimmer_phase: f32,
 ) -> View {
     let theme = current_theme();
 
@@ -555,15 +635,16 @@ fn sidebar(
                     entry,
                     selected == Some(entry.id),
                     set_selected.clone(),
-                    set_devices.clone()
-                ).key(entry.id.to_string())
+                    set_devices.clone(),
+                )
+                .key(entry.id.to_string()),
             )
         };
         list = list.child_boxed(row);
     }
 
     let add_button = Button::new()
-        .label("CİHAZ EKLE")
+        .label("Add device")
         .icon(
             r#"<svg viewBox="0 0 24 24"><path d="M11 13H5v-2h6V5h2v6h6v2h-6v6h-2z" fill="currentColor"/></svg>"#
         )
@@ -585,11 +666,11 @@ fn sidebar(
         .border(Border::right(1, theme.outline_variant))
         .child(
             Label::new()
-                .label("BAĞLI PERİFERİKLER")
+                .label("Devices")
                 .font_size(12)
                 .font_weight(FontWeight::SemiBold)
                 .letter_spacing(1.4)
-                .color(theme.on_surface_variant)
+                .color(theme.on_surface_variant),
         )
         .child(add_button)
         .child(
@@ -598,20 +679,25 @@ fn sidebar(
                 .width(pct!(100.0))
                 .overflow_y(Overflow::Auto)
                 .overscroll(Overscroll::Glow)
-                .child(list)
+                .child(list),
         )
 }
 
 fn device_illustration(entry: &DeviceEntry, breathe_phase: f32) -> View {
     let theme = current_theme();
-    let led_opacity = if
-        entry.battery.map(|b| matches!(b.state, ChargingState::Charging)).unwrap_or(false)
+    let led_opacity = if entry
+        .battery
+        .map(|b| matches!(b.state, ChargingState::Charging))
+        .unwrap_or(false)
     {
         0.35 + 0.65 * (0.5 + 0.5 * breathe_phase.sin())
     } else {
         1.0
     };
-    let led_color = entry.battery.map(|b| battery_color(b.percentage)).unwrap_or(theme.outline);
+    let led_color = entry
+        .battery
+        .map(|b| battery_color(b.percentage))
+        .unwrap_or(theme.outline);
 
     m3_card()
         .width(pct!(100.0))
@@ -623,7 +709,7 @@ fn device_illustration(entry: &DeviceEntry, breathe_phase: f32) -> View {
                 .fill_by_id("mouse_led", led_color)
                 .opacity_by_id("mouse_led", led_opacity)
                 .width(220)
-                .height(220)
+                .height(220),
         )
 }
 
@@ -640,7 +726,9 @@ fn battery_card(status: Option<BatteryStatus>) -> View {
                 .align_items(Align::Center)
                 .gap(8.0, 0.0)
                 .child(
-                    VariableIcon::new(codepoints::BATTERY_FULL).size(20.0).color(battery_color(pct))
+                    VariableIcon::new(codepoints::BATTERY_FULL)
+                        .size(20.0)
+                        .color(battery_color(pct)),
                 )
                 .child(
                     Row::new()
@@ -649,19 +737,19 @@ fn battery_card(status: Option<BatteryStatus>) -> View {
                         .align_items(Align::Center)
                         .child(
                             Label::new()
-                                .label("PİL")
+                                .label("Battery")
                                 .font_size(12)
                                 .letter_spacing(1.0)
-                                .color(theme.on_surface_variant)
+                                .color(theme.on_surface_variant),
                         )
                         .child(
                             Label::new()
                                 .label(format!("{pct}%"))
                                 .font_size(22)
                                 .font_weight(FontWeight::SemiBold)
-                                .color(theme.on_surface)
-                        )
-                )
+                                .color(theme.on_surface),
+                        ),
+                ),
         )
         .child(
             View::new()
@@ -676,9 +764,9 @@ fn battery_card(status: Option<BatteryStatus>) -> View {
                         .background(battery_color(pct))
                         .border(Border::all(0, Color::TRANSPARENT).radius(2.0))
                         .transition_all(
-                            Transition::new(Duration::from_millis(400)).easing(Easing::EaseOut)
-                        )
-                )
+                            Transition::new(Duration::from_millis(400)).easing(Easing::EaseOut),
+                        ),
+                ),
         )
 }
 
@@ -695,15 +783,24 @@ fn status_row(icon: char, label: &str, value: String) -> View {
             Row::new()
                 .align_items(Align::Center)
                 .gap(8.0, 0.0)
-                .child(VariableIcon::new(icon).size(16.0).color(theme.on_surface_variant))
-                .child(Label::new().label(label).font_size(13).color(theme.on_surface_variant))
+                .child(
+                    VariableIcon::new(icon)
+                        .size(16.0)
+                        .color(theme.on_surface_variant),
+                )
+                .child(
+                    Label::new()
+                        .label(label)
+                        .font_size(13)
+                        .color(theme.on_surface_variant),
+                ),
         )
         .child(
             Label::new()
                 .label(value)
                 .font_size(13)
                 .font_weight(FontWeight::Medium)
-                .color(theme.on_surface)
+                .color(theme.on_surface),
         )
 }
 
@@ -721,23 +818,23 @@ fn connection_label(connection: ConnectionType) -> &'static str {
         ConnectionType::Usb => "USB",
         ConnectionType::Wireless2_4Ghz => "2.4GHz",
         ConnectionType::Bluetooth => "Bluetooth",
-        ConnectionType::Unknown => "Bilinmiyor",
+        ConnectionType::Unknown => "Unknown",
     }
 }
 
 fn status_card(entry: &DeviceEntry) -> View {
     let theme = current_theme();
-    let charging = entry.battery
+    let charging = entry
+        .battery
         .map(|b| matches!(b.state, ChargingState::Charging))
         .unwrap_or(false);
 
     let (connection_icon, connection_text) = match entry.battery {
-        Some(status) if entry.connected =>
-            (
-                connection_icon(status.connection),
-                format!("Bağlı ({})", connection_label(status.connection)),
-            ),
-        _ => (codepoints::LINK_OFF, "Bağlı değil".to_string()),
+        Some(status) if entry.connected => (
+            connection_icon(status.connection),
+            format!("Connected ({})", connection_label(status.connection)),
+        ),
+        _ => (codepoints::LINK_OFF, "Disconnected".to_string()),
     };
 
     let mut card = m3_card()
@@ -745,25 +842,23 @@ fn status_card(entry: &DeviceEntry) -> View {
         .padding(Edges::all(20.0))
         .child(
             Label::new()
-                .label("DURUM")
+                .label("Status")
                 .font_size(12)
                 .font_weight(FontWeight::SemiBold)
                 .letter_spacing(1.2)
                 .color(theme.on_surface)
-                .margin(Edges::only(0, 0, 0, 10))
+                .margin(Edges::only(0, 0, 0, 10)),
         )
-        .child(
-            status_row(
-                if charging {
-                    codepoints::BATTERY_CHARGING_FULL
-                } else {
-                    codepoints::BATTERY_FULL
-                },
-                "Durum",
-                (if charging { "Şarj oluyor" } else { "Şarjda değil" }).to_string()
-            )
-        )
-        .child(status_row(connection_icon, "Bağlantı", connection_text));
+        .child(status_row(
+            if charging {
+                codepoints::BATTERY_CHARGING_FULL
+            } else {
+                codepoints::BATTERY_FULL
+            },
+            "Battery",
+            (if charging { "Charging" } else { "Not charging" }).to_string(),
+        ))
+        .child(status_row(connection_icon, "Connection", connection_text));
 
     if let Some(err) = &entry.error {
         card = card.child(
@@ -774,8 +869,11 @@ fn status_card(entry: &DeviceEntry) -> View {
                 .background(theme.error_container)
                 .border(Border::all(1, theme.error.with_alpha(80)).radius(theme.radius_sm))
                 .child(
-                    Label::new().label(err.clone()).font_size(12).color(theme.on_error_container)
-                )
+                    Label::new()
+                        .label(err.clone())
+                        .font_size(12)
+                        .color(theme.on_error_container),
+                ),
         );
     }
 
@@ -823,13 +921,15 @@ fn polling_rate_card(entry: &DeviceEntry, set_devices: SetState<Vec<DeviceEntry>
                     if selected {
                         return;
                     }
-                    *pending_rate.lock().unwrap() = Some(rate);
+                    if let Ok(mut pending) = pending_rate.lock() {
+                        *pending = Some(rate);
+                    }
                     set_devices.update(move |list| {
                         if let Some(entry) = list.iter_mut().find(|e| e.id == entry_id) {
                             entry.applying_rate = true;
                         }
                     });
-                })
+                }),
         );
     }
 
@@ -839,11 +939,11 @@ fn polling_rate_card(entry: &DeviceEntry, set_devices: SetState<Vec<DeviceEntry>
         .padding(Edges::all(20.0))
         .child(
             Label::new()
-                .label("POLLING RATE")
+                .label("Polling rate")
                 .font_size(12)
                 .font_weight(FontWeight::SemiBold)
                 .letter_spacing(1.2)
-                .color(theme.on_surface)
+                .color(theme.on_surface),
         )
         .child(row)
 }
@@ -851,7 +951,7 @@ fn polling_rate_card(entry: &DeviceEntry, set_devices: SetState<Vec<DeviceEntry>
 fn detail_panel(
     entry: Option<&DeviceEntry>,
     breathe_phase: f32,
-    set_devices: SetState<Vec<DeviceEntry>>
+    set_devices: SetState<Vec<DeviceEntry>>,
 ) -> View {
     let theme = current_theme();
 
@@ -863,9 +963,9 @@ fn detail_panel(
             .overscroll(Overscroll::Glow)
             .child(
                 Label::new()
-                    .label("Soldan bir cihaz seçin veya yeni cihaz ekleyin")
+                    .label("Select a device or add a new one")
                     .font_size(15)
-                    .color(theme.on_surface_variant)
+                    .color(theme.on_surface_variant),
             );
     };
 
@@ -880,15 +980,15 @@ fn detail_panel(
                     Label::new()
                         .label(entry.brand.clone())
                         .font_size(14)
-                        .color(theme.on_surface_variant)
+                        .color(theme.on_surface_variant),
                 )
                 .child(
                     Label::new()
                         .label(entry.model.clone())
                         .font_size(24)
                         .font_weight(FontWeight::SemiBold)
-                        .color(theme.on_surface)
-                )
+                        .color(theme.on_surface),
+                ),
         )
         .child(refresh_button(entry.refresh_requested.clone()));
 
@@ -918,7 +1018,7 @@ fn detail_panel(
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let config = AppConfig {
-        title: "PERİFERİK TELEMETRİ SİSTEMİ".into(),
+        title: "Hardware Controller".into(),
         width: 960,
         height: 600,
         position: WindowPosition::Center,
@@ -931,7 +1031,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let (devices_list, set_devices) = use_state(Vec::<DeviceEntry>::new());
         let (selected_id, set_selected) = use_state(Option::<u64>::None);
         let (picker_open, set_picker_open) = use_state(false);
+        let (modal_entered, set_modal_entered) = use_state(false);
         let (breathe_phase, set_breathe_phase) = use_state(0.0f32);
+
+        use_effect(
+            {
+                let set_modal_entered = set_modal_entered.clone();
+                move || {
+                    let cancelled = Arc::new(AtomicBool::new(false));
+
+                    if picker_open {
+                        let cancelled_for_task = cancelled.clone();
+                        spawn(async move {
+                            spawn_blocking(|| std::thread::sleep(Duration::from_millis(16))).await;
+                            if !cancelled_for_task.load(Ordering::Acquire) {
+                                set_modal_entered.set(true);
+                            }
+                        });
+                    } else {
+                        set_modal_entered.set(false);
+                    }
+
+                    move || cancelled.store(true, Ordering::Release)
+                }
+            },
+            [picker_open],
+        );
 
         use_effect(
             {
@@ -940,64 +1065,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 move || {
                     let keys = load_persisted_keys();
                     for (i, key) in keys.iter().enumerate() {
-                        if
-                            let Some(&descriptor) = catalog()
-                                .iter()
-                                .find(|d| device_key(d.brand, d.model) == *key)
+                        if let Some(&descriptor) = catalog()
+                            .iter()
+                            .find(|d| device_key(d.brand, d.model) == *key)
                         {
                             add_device(
                                 descriptor,
                                 set_devices.clone(),
                                 set_selected.clone(),
-                                i == 0
+                                i == 0,
                             );
                         }
                     }
                 }
             },
-            ()
+            (),
         );
 
-        use_effect(move || {
-            spawn(async move {
-                let mut phase: f32 = 0.0;
-                loop {
-                    spawn_blocking(|| std::thread::sleep(Duration::from_millis(33))).await;
-                    phase = (phase + (std::f32::consts::TAU / 2.0) * 0.033) % std::f32::consts::TAU;
-                    set_breathe_phase.set(phase);
-                }
-            });
-        }, ());
+        use_effect(
+            move || {
+                spawn(async move {
+                    let mut phase: f32 = 0.0;
+                    loop {
+                        spawn_blocking(|| std::thread::sleep(Duration::from_millis(33))).await;
+                        phase =
+                            (phase + (std::f32::consts::TAU / 2.0) * 0.033) % std::f32::consts::TAU;
+                        set_breathe_phase.set(phase);
+                    }
+                });
+            },
+            (),
+        );
 
         let theme = current_theme();
         let selected_entry = devices_list.iter().find(|e| Some(e.id) == selected_id);
 
-        Box::new(
-            Row::new()
-                .width(pct!(100.0))
-                .height(pct!(100.0))
-                .background(theme.background)
-                .child(
-                    sidebar(
-                        &devices_list,
-                        selected_id,
-                        set_selected.clone(),
-                        set_devices.clone(),
-                        picker_open,
-                        set_picker_open.clone(),
-                        breathe_phase
-                    )
-                )
-                .child(detail_panel(selected_entry, breathe_phase, set_devices.clone()))
-                .child(
-                    add_device_modal(
-                        picker_open,
-                        set_picker_open.clone(),
-                        set_devices.clone(),
-                        set_selected.clone()
-                    )
-                )
-        )
+        let mut root = Row::new()
+            .width(pct!(100.0))
+            .height(pct!(100.0))
+            .background(theme.background)
+            .child(sidebar(
+                &devices_list,
+                selected_id,
+                set_selected.clone(),
+                set_devices.clone(),
+                picker_open,
+                set_picker_open.clone(),
+                breathe_phase,
+            ))
+            .child(detail_panel(
+                selected_entry,
+                breathe_phase,
+                set_devices.clone(),
+            ));
+
+        if picker_open {
+            root = root.child(add_device_modal(
+                modal_entered,
+                set_picker_open.clone(),
+                set_devices.clone(),
+                set_selected.clone(),
+            ));
+        }
+
+        Box::new(root)
     });
 
     app.run()?;

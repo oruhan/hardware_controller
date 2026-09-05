@@ -1,12 +1,23 @@
 [package]
 name = "gui"
-version = "0.1.0"
-edition = "2024"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Linux desktop application for peripheral telemetry and control"
+
+[[bin]]
+name = "hardware-controller"
+path = "src/main.rs"
+
+[lints]
+workspace = true
 
 [dependencies]
 xengui.workspace = true
-xengui-icons.workspace = true
 xenframe.workspace = true
+xengui-icons.workspace = true
 razer.workspace = true
 devices.workspace = true
 serde.workspace = true

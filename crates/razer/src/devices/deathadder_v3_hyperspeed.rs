@@ -30,9 +30,8 @@ impl DaV3HS {
 
             let pid = info.product_id();
 
-            if
-                pid != DEATHADDER_V3_HYPERSPEED_WIRED_PID &&
-                pid != DEATHADDER_V3_HYPERSPEED_WIRELESS_PID
+            if pid != DEATHADDER_V3_HYPERSPEED_WIRED_PID
+                && pid != DEATHADDER_V3_HYPERSPEED_WIRELESS_PID
             {
                 continue;
             }

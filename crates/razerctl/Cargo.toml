@@ -1,0 +1,14 @@
+[package]
+name = "razerctl"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+repository.workspace = true
+description = "Command-line diagnostics for supported Razer devices"
+
+[lints]
+workspace = true
+
+[dependencies]
+razer.workspace = true

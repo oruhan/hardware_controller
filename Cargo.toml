@@ -3,9 +3,11 @@ resolver = "2"
 members = ["crates/*"]
 
 [workspace.package]
+version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
 rust-version = "1.92"
+repository = "https://github.com/oruhan/hardware_controller"
 
 [profile.release]
 opt-level = 3
@@ -21,20 +23,25 @@ opt-level = 2
 opt-level = 1
 
 [workspace.dependencies]
-xengui = { path = "../workspaces/xen-workspace/crates/xengui" }
-xenframe = { path = "../workspaces/xen-workspace/crates/xenframe" }
-xengui-icons = { path = "../workspaces/xen-workspace/crates/xengui-icons" }
+# The UI uses APIs queued for xengui 0.2.8/xenframe 0.1.2. Pin the exact
+# upstream revision so clean builds are reproducible until those releases land.
+xengui = { git = "https://github.com/randseas/xengui.git", rev = "fbd2255123d43e8e84036c23a4e45530ceb5bc34" }
+xenframe = { git = "https://github.com/randseas/xengui.git", rev = "fbd2255123d43e8e84036c23a4e45530ceb5bc34" }
+xengui-icons = { git = "https://github.com/randseas/xengui.git", rev = "fbd2255123d43e8e84036c23a4e45530ceb5bc34" }
 
 gui = { path = "crates/gui" }
 razer = { path = "crates/razer" }
 devices = { path = "crates/devices" }
 
-hidapi = { version = "2.6.6", features = ["windows-native"] }
 thiserror = "2.0.20"
-windows = { version = "0.62.2", features = [
-    "Win32_Devices_HumanInterfaceDevice",
-    "Win32_Foundation",
-] }
-
 serde = { version = "1", features = ["derive"] }
 toml = "0.8"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+
+[patch."https://github.com/randseas/xengui.git"]
+xengui = { path = "vendor/xengui" }

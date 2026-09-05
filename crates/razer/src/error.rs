@@ -1,18 +1,20 @@
-use crate::protocol::{ RazerCommand, RazerStatus };
+use crate::protocol::{RazerCommand, RazerStatus};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RazerError {
-    #[error("HID error: {0}")] Hid(#[from] hidapi::HidError),
+    #[error("HID error: {0}")]
+    Hid(#[from] hidapi::HidError),
 
-    #[error("DeathAdder V3 HyperSpeed battery interface not found")]
+    #[error(
+        "DeathAdder V3 HyperSpeed control interface not found; check the USB connection and Linux udev permissions"
+    )]
     DeviceNotFound,
 
-    #[error("short feature report: expected {expected} bytes, received {received}")] ShortReport {
-        expected: usize,
-        received: usize,
-    },
+    #[error("short feature report: expected {expected} bytes, received {received}")]
+    ShortReport { expected: usize, received: usize },
 
-    #[error("unexpected response status: {0:?}")] UnexpectedStatus(RazerStatus),
+    #[error("unexpected response status: {0:?}")]
+    UnexpectedStatus(RazerStatus),
 
     #[error(
         "unexpected command: expected {:02X}:{:02X}, received {:02X}:{:02X}",
@@ -20,7 +22,8 @@ pub enum RazerError {
         expected.id,
         received.class,
         received.id
-    )] UnexpectedCommand {
+    )]
+    UnexpectedCommand {
         expected: RazerCommand,
         received: RazerCommand,
     },
@@ -29,20 +32,18 @@ pub enum RazerError {
         "transaction mismatch: expected {:02X}, received {:02X}",
         expected,
         received
-    )] TransactionMismatch {
-        expected: u8,
-        received: u8,
-    },
+    )]
+    TransactionMismatch { expected: u8, received: u8 },
 
-    #[error("CRC mismatch: expected {expected:02X}, received {received:02X}")] CrcMismatch {
-        expected: u8,
-        received: u8,
-    },
+    #[error("CRC mismatch: expected {expected:02X}, received {received:02X}")]
+    CrcMismatch { expected: u8, received: u8 },
 
     #[error("command timed out")]
     Timeout,
 
-    #[error("invalid argument index: {0}")] InvalidArgument(usize),
+    #[error("invalid argument index: {0}")]
+    InvalidArgument(usize),
 
-    #[error("unknown polling rate value: {0:#04x}")] UnknownPollingRate(u8),
+    #[error("unknown polling rate value: {0:#04x}")]
+    UnknownPollingRate(u8),
 }

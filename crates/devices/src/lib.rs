@@ -56,11 +56,15 @@ pub trait Device: Send {
     }
 
     fn get_polling_rate(&mut self) -> Result<PollingRate, DeviceError> {
-        Err(DeviceError("this device does not support polling rate control".to_string()))
+        Err(DeviceError(
+            "this device does not support polling rate control".to_string(),
+        ))
     }
 
     fn set_polling_rate(&mut self, _rate: PollingRate) -> Result<(), DeviceError> {
-        Err(DeviceError("this device does not support polling rate control".to_string()))
+        Err(DeviceError(
+            "this device does not support polling rate control".to_string(),
+        ))
     }
 }
 

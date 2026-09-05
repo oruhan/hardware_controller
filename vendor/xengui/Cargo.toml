@@ -1,0 +1,46 @@
+[package]
+name = "xengui"
+version = "0.2.8"
+edition = "2024"
+rust-version = "1.92"
+authors = ["randseas <waultbank@gmail.com>"]
+description = "a retained-mode gui library in rust"
+license = "Apache-2.0"
+repository = "https://github.com/randseas/xengui"
+readme = "README.md"
+keywords = ["gui", "portable", "graphics"]
+categories = ["gui"]
+
+[package.metadata.docs.rs]
+targets = ["x86_64-unknown-linux-gnu", "wasm32-unknown-unknown"]
+
+[dependencies]
+smol_str = "0.3"
+log = "0.4"
+web-time = "1.1.0"
+taffy = { version = "0.12.1", features = ["grid"] }
+image = { version = "0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
+xen-clipboard = { git = "https://github.com/randseas/xengui.git", rev = "fbd2255123d43e8e84036c23a4e45530ceb5bc34" }
+xen-animation = { git = "https://github.com/randseas/xengui.git", rev = "fbd2255123d43e8e84036c23a4e45530ceb5bc34" }
+xen-svg = { git = "https://github.com/randseas/xengui.git", rev = "fbd2255123d43e8e84036c23a4e45530ceb5bc34" }
+xengui-icons = { git = "https://github.com/randseas/xengui.git", rev = "fbd2255123d43e8e84036c23a4e45530ceb5bc34" }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+system-fonts = "0.1.2"
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+web-sys = { version = "0.3", features = [
+    "Window",
+    "Document",
+    "Element",
+    "HtmlElement",
+    "Node",
+    "HtmlCanvasElement",
+    "HtmlInputElement",
+    "Navigator",
+    "KeyboardEvent",
+    "Event",
+    "MediaQueryList",
+    "MediaQueryListEvent",
+    "VisualViewport",
+] }

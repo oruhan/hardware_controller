@@ -132,6 +132,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f2032f911046de80f0a198e0901378627c33f59ea0ac00e363d481118bd70a53"
 
 [[package]]
+name = "basic-udev"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "5a45f9771ced8a774de5e5ebffbe520f52e3943bf5a9a6baa3a5d14a5de1afe6"
+
+[[package]]
 name = "bit-set"
 version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -869,9 +875,11 @@ version = "2.6.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c78dadfc12f865bc3fcac3897e64533b930737ceb9ef245c8277de98d0b010e9"
 dependencies = [
+ "basic-udev",
  "cc",
  "cfg-if",
  "libc",
+ "nix",
  "pkg-config",
  "windows-sys 0.61.2",
 ]
@@ -1242,6 +1250,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ee6cda3051665f1fb8d9e08fc35c96d5a244fb1be711a03b71118828afc9a873"
 dependencies = [
  "jni-sys 0.3.1",
+]
+
+[[package]]
+name = "nix"
+version = "0.30.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "74523f3a35e05aba87a1d978330aef40f67b0304ac79c1c00b294c9830543db6"
+dependencies = [
+ "bitflags 2.13.1",
+ "cfg-if",
+ "cfg_aliases",
+ "libc",
 ]
 
 [[package]]
@@ -1828,7 +1848,13 @@ version = "0.1.0"
 dependencies = [
  "hidapi",
  "thiserror 2.0.20",
- "windows",
+]
+
+[[package]]
+name = "razerctl"
+version = "0.1.0"
+dependencies = [
+ "razer",
 ]
 
 [[package]]
@@ -2253,13 +2279,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
-]
-
-[[package]]
-name = "testpolling"
-version = "0.1.0"
-dependencies = [
- "razer",
 ]
 
 [[package]]
@@ -3222,6 +3241,7 @@ checksum = "163b33ed8786455e2fa5d72f554057ce3f3182425434f756cd39c99839d88e23"
 [[package]]
 name = "xen-animation"
 version = "0.1.4"
+source = "git+https://github.com/randseas/xengui.git?rev=fbd2255123d43e8e84036c23a4e45530ceb5bc34#fbd2255123d43e8e84036c23a4e45530ceb5bc34"
 dependencies = [
  "web-time",
 ]
@@ -3229,6 +3249,7 @@ dependencies = [
 [[package]]
 name = "xen-clipboard"
 version = "0.1.7"
+source = "git+https://github.com/randseas/xengui.git?rev=fbd2255123d43e8e84036c23a4e45530ceb5bc34#fbd2255123d43e8e84036c23a4e45530ceb5bc34"
 dependencies = [
  "js-sys",
  "wasm-bindgen-futures",
@@ -3239,6 +3260,7 @@ dependencies = [
 [[package]]
 name = "xen-svg"
 version = "0.1.1"
+source = "git+https://github.com/randseas/xengui.git?rev=fbd2255123d43e8e84036c23a4e45530ceb5bc34#fbd2255123d43e8e84036c23a4e45530ceb5bc34"
 dependencies = [
  "image",
  "log",
@@ -3247,7 +3269,8 @@ dependencies = [
 
 [[package]]
 name = "xenframe"
-version = "0.1.1"
+version = "0.1.2"
+source = "git+https://github.com/randseas/xengui.git?rev=fbd2255123d43e8e84036c23a4e45530ceb5bc34#fbd2255123d43e8e84036c23a4e45530ceb5bc34"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
@@ -3267,7 +3290,7 @@ dependencies = [
 
 [[package]]
 name = "xengui"
-version = "0.2.7"
+version = "0.2.8"
 dependencies = [
  "image",
  "log",
@@ -3285,13 +3308,15 @@ dependencies = [
 [[package]]
 name = "xengui-icons"
 version = "0.1.0"
+source = "git+https://github.com/randseas/xengui.git?rev=fbd2255123d43e8e84036c23a4e45530ceb5bc34#fbd2255123d43e8e84036c23a4e45530ceb5bc34"
 dependencies = [
  "xen-svg",
 ]
 
 [[package]]
 name = "xengui-wgpu"
-version = "0.1.1"
+version = "0.1.2"
+source = "git+https://github.com/randseas/xengui.git?rev=fbd2255123d43e8e84036c23a4e45530ceb5bc34#fbd2255123d43e8e84036c23a4e45530ceb5bc34"
 dependencies = [
  "bytemuck",
  "glyphon",

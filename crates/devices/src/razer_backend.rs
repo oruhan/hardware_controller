@@ -1,12 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 use crate::{
-    BatteryStatus,
-    ChargingState,
-    ConnectionType,
-    Device,
-    DeviceDescriptor,
-    DeviceError,
-    DeviceKind,
+    BatteryStatus, ChargingState, ConnectionType, Device, DeviceDescriptor, DeviceError, DeviceKind,
 };
 use razer::DaV3HS;
 
@@ -43,11 +37,15 @@ impl Device for DeathAdderV3HyperSpeed {
     }
 
     fn get_polling_rate(&mut self) -> Result<crate::PollingRate, DeviceError> {
-        self.0.get_polling_rate().map_err(|e| DeviceError(e.to_string()))
+        self.0
+            .get_polling_rate()
+            .map_err(|e| DeviceError(e.to_string()))
     }
 
     fn set_polling_rate(&mut self, rate: crate::PollingRate) -> Result<(), DeviceError> {
-        self.0.set_polling_rate(rate).map_err(|e| DeviceError(e.to_string()))
+        self.0
+            .set_polling_rate(rate)
+            .map_err(|e| DeviceError(e.to_string()))
     }
 }
 
@@ -57,12 +55,10 @@ fn open_deathadder_v3_hyperspeed() -> Result<Box<dyn Device>, DeviceError> {
         .map_err(|e| DeviceError(e.to_string()))
 }
 
-pub(super) const RAZER_DEVICES: &[DeviceDescriptor] = &[
-    DeviceDescriptor {
-        brand: "Razer",
-        model: "DeathAdder V3 HyperSpeed",
-        kind: DeviceKind::Mouse,
-        image_svg: include_str!("../../gui/assets/mouse.svg"),
-        open: open_deathadder_v3_hyperspeed,
-    },
-];
+pub(super) const RAZER_DEVICES: &[DeviceDescriptor] = &[DeviceDescriptor {
+    brand: "Razer",
+    model: "DeathAdder V3 HyperSpeed",
+    kind: DeviceKind::Mouse,
+    image_svg: include_str!("../../gui/assets/mouse.svg"),
+    open: open_deathadder_v3_hyperspeed,
+}];

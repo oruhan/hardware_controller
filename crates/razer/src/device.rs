@@ -3,16 +3,11 @@ use std::time::Duration;
 
 use hidapi::HidDevice;
 
-use crate::battery::{ Battery, ChargingState };
+use crate::battery::{Battery, ChargingState};
 use crate::error::RazerError;
 use crate::protocol::{
+    HID_REPORT_LEN, PollingRate, REPORT_LEN, RazerRequest, RazerResponse, RazerStatus,
     calculate_crc,
-    PollingRate,
-    RazerRequest,
-    RazerResponse,
-    RazerStatus,
-    HID_REPORT_LEN,
-    REPORT_LEN,
 };
 
 pub struct RazerDevice {
@@ -24,14 +19,13 @@ impl RazerDevice {
     pub(crate) fn new(device: HidDevice) -> Self {
         Self {
             device,
-            transaction_id: 0x06,
+            // OpenRazer uses 0x1f for all DeathAdder V3 HyperSpeed commands.
+            transaction_id: 0x1f,
         }
     }
 
-    fn next_transaction_id(&mut self) -> u8 {
-        let id = self.transaction_id;
-        self.transaction_id = self.transaction_id.wrapping_add(1);
-        id
+    const fn transaction_id(&self) -> u8 {
+        self.transaction_id
     }
 
     fn send_request(&self, request: RazerRequest) -> Result<(), RazerError> {
@@ -61,87 +55,92 @@ impl RazerDevice {
     }
 
     fn execute(&mut self, request: RazerRequest) -> Result<RazerResponse, RazerError> {
-        self.send_request(request)?;
-
         const MAX_ATTEMPTS: usize = 5;
+        let mut last_error = RazerError::Timeout;
 
         for _ in 0..MAX_ATTEMPTS {
-            thread::sleep(Duration::from_millis(5));
-            let response = self.read_response()?;
+            // OpenRazer resends the request on every attempt. This matters when a
+            // wireless receiver is waking up and drops the first control transfer.
+            if let Err(error) = self.send_request(request) {
+                last_error = error;
+                continue;
+            }
+
+            // This receiver family needs the longer delay used by OpenRazer.
+            thread::sleep(Duration::from_millis(10));
+            let response = match self.read_response() {
+                Ok(response) => response,
+                Err(error) => {
+                    last_error = error;
+                    continue;
+                }
+            };
 
             if response.transaction_id != request.transaction_id {
+                last_error = RazerError::TransactionMismatch {
+                    expected: request.transaction_id,
+                    received: response.transaction_id,
+                };
+                continue;
+            }
+
+            if response.command != request.command {
+                last_error = RazerError::UnexpectedCommand {
+                    expected: request.command,
+                    received: response.command,
+                };
+                continue;
+            }
+
+            let expected_crc = calculate_crc(&response.raw);
+            let received_crc = response.raw[88];
+            if received_crc != expected_crc {
+                last_error = RazerError::CrcMismatch {
+                    expected: expected_crc,
+                    received: received_crc,
+                };
                 continue;
             }
 
             match response.status {
-                RazerStatus::New | RazerStatus::Busy => {
-                    continue;
-                }
-                RazerStatus::Success => {
-                    if response.command != request.command {
-                        return Err(RazerError::UnexpectedCommand {
-                            expected: request.command,
-                            received: response.command,
-                        });
-                    }
-
-                    let expected_crc = calculate_crc(&response.raw);
-                    let received_crc = response.raw[88];
-
-                    if received_crc != expected_crc {
-                        return Err(RazerError::CrcMismatch {
-                            expected: expected_crc,
-                            received: received_crc,
-                        });
-                    }
-
-                    return Ok(response);
-                }
-                RazerStatus::Failure => {
-                    return Err(RazerError::UnexpectedStatus(RazerStatus::Failure));
-                }
-                RazerStatus::Timeout => {
-                    return Err(RazerError::Timeout);
-                }
-                status => {
-                    return Err(RazerError::UnexpectedStatus(status));
-                }
+                // OpenRazer treats BUSY as a valid response for commands on
+                // devices whose firmware reports success this way.
+                RazerStatus::Success | RazerStatus::Busy => return Ok(response),
+                RazerStatus::New => last_error = RazerError::UnexpectedStatus(RazerStatus::New),
+                RazerStatus::Timeout => last_error = RazerError::Timeout,
+                status => last_error = RazerError::UnexpectedStatus(status),
             }
         }
 
-        Err(RazerError::Timeout)
+        Err(last_error)
     }
 
     pub fn set_polling_rate(&mut self, rate: PollingRate) -> Result<(), RazerError> {
-        let transaction_id = self.next_transaction_id();
+        let transaction_id = self.transaction_id();
         let request = RazerRequest::set_polling_rate(transaction_id, rate);
 
-        let response = self.execute(request)?;
-
-        if !response.is_success() {
-            return Err(RazerError::UnexpectedStatus(response.status));
-        }
+        self.execute(request)?;
 
         Ok(())
     }
 
     pub fn get_polling_rate(&mut self) -> Result<PollingRate, RazerError> {
-        let transaction_id = self.next_transaction_id();
+        let transaction_id = self.transaction_id();
         let request = RazerRequest::get_polling_rate(transaction_id);
         let response = self.execute(request)?;
-        let raw = response.argument(1).ok_or(RazerError::InvalidArgument(1))?;
+        let raw = response.argument(0).ok_or(RazerError::InvalidArgument(0))?;
         PollingRate::from_protocol_value(raw).ok_or(RazerError::UnknownPollingRate(raw))
     }
 
     fn query_battery_level(&mut self) -> Result<u8, RazerError> {
-        let transaction_id = self.next_transaction_id();
+        let transaction_id = self.transaction_id();
         let request = RazerRequest::battery(transaction_id);
         let response = self.execute(request)?;
         response.argument(1).ok_or(RazerError::InvalidArgument(1))
     }
 
     fn query_charging_state(&mut self) -> Result<ChargingState, RazerError> {
-        let transaction_id = self.next_transaction_id();
+        let transaction_id = self.transaction_id();
         let request = RazerRequest::charging_status(transaction_id);
         let response = self.execute(request)?;
         let raw = response.argument(1).ok_or(RazerError::InvalidArgument(1))?;
@@ -152,6 +151,10 @@ impl RazerDevice {
         let raw = self.query_battery_level()?;
         let percentage = (((raw as u16) * 100) / 255) as u8;
         let state = self.query_charging_state()?;
-        Ok(Battery { raw, percentage, state })
+        Ok(Battery {
+            raw,
+            percentage,
+            state,
+        })
     }
 }
