@@ -3241,7 +3241,6 @@ checksum = "163b33ed8786455e2fa5d72f554057ce3f3182425434f756cd39c99839d88e23"
 [[package]]
 name = "xen-animation"
 version = "0.1.4"
-source = "git+https://github.com/randseas/xengui.git?rev=fbd2255123d43e8e84036c23a4e45530ceb5bc34#fbd2255123d43e8e84036c23a4e45530ceb5bc34"
 dependencies = [
  "web-time",
 ]
@@ -3249,7 +3248,6 @@ dependencies = [
 [[package]]
 name = "xen-clipboard"
 version = "0.1.7"
-source = "git+https://github.com/randseas/xengui.git?rev=fbd2255123d43e8e84036c23a4e45530ceb5bc34#fbd2255123d43e8e84036c23a4e45530ceb5bc34"
 dependencies = [
  "js-sys",
  "wasm-bindgen-futures",
@@ -3260,7 +3258,6 @@ dependencies = [
 [[package]]
 name = "xen-svg"
 version = "0.1.1"
-source = "git+https://github.com/randseas/xengui.git?rev=fbd2255123d43e8e84036c23a4e45530ceb5bc34#fbd2255123d43e8e84036c23a4e45530ceb5bc34"
 dependencies = [
  "image",
  "log",
@@ -3270,7 +3267,6 @@ dependencies = [
 [[package]]
 name = "xenframe"
 version = "0.1.2"
-source = "git+https://github.com/randseas/xengui.git?rev=fbd2255123d43e8e84036c23a4e45530ceb5bc34#fbd2255123d43e8e84036c23a4e45530ceb5bc34"
 dependencies = [
  "console_error_panic_hook",
  "console_log",
@@ -3308,7 +3304,6 @@ dependencies = [
 [[package]]
 name = "xengui-icons"
 version = "0.1.0"
-source = "git+https://github.com/randseas/xengui.git?rev=fbd2255123d43e8e84036c23a4e45530ceb5bc34#fbd2255123d43e8e84036c23a4e45530ceb5bc34"
 dependencies = [
  "xen-svg",
 ]
@@ -3316,7 +3311,6 @@ dependencies = [
 [[package]]
 name = "xengui-wgpu"
 version = "0.1.2"
-source = "git+https://github.com/randseas/xengui.git?rev=fbd2255123d43e8e84036c23a4e45530ceb5bc34#fbd2255123d43e8e84036c23a4e45530ceb5bc34"
 dependencies = [
  "bytemuck",
  "glyphon",

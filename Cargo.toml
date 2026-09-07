@@ -25,9 +25,9 @@ opt-level = 1
 [workspace.dependencies]
 # The UI uses APIs queued for xengui 0.2.8/xenframe 0.1.2. Pin the exact
 # upstream revision so clean builds are reproducible until those releases land.
-xengui = { git = "https://github.com/randseas/xengui.git", rev = "fbd2255123d43e8e84036c23a4e45530ceb5bc34" }
-xenframe = { git = "https://github.com/randseas/xengui.git", rev = "fbd2255123d43e8e84036c23a4e45530ceb5bc34" }
-xengui-icons = { git = "https://github.com/randseas/xengui.git", rev = "fbd2255123d43e8e84036c23a4e45530ceb5bc34" }
+xengui = { path = "../xen-workspace/crates/xengui" }
+xenframe = { path = "../xen-workspace/crates/xenframe" }
+xengui-icons = { path = "../xen-workspace/crates/xengui-icons" }
 
 gui = { path = "crates/gui" }
 razer = { path = "crates/razer" }
@@ -42,6 +42,3 @@ unsafe_code = "forbid"
 
 [workspace.lints.clippy]
 all = { level = "warn", priority = -1 }
-
-[patch."https://github.com/randseas/xengui.git"]
-xengui = { path = "vendor/xengui" }

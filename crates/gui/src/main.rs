@@ -678,7 +678,7 @@ fn sidebar(
                 .flex_grow(1.0)
                 .width(pct!(100.0))
                 .overflow_y(Overflow::Auto)
-                .overscroll(Overscroll::Glow)
+                .overscroll(Overscroll::Bounce)
                 .child(list),
         )
 }
@@ -960,7 +960,7 @@ fn detail_panel(
             .flex_grow(1.0)
             .align_items(Align::Center)
             .justify_content(JustifyContent::Center)
-            .overscroll(Overscroll::Glow)
+            
             .child(
                 Label::new()
                     .label("Select a device or add a new one")
@@ -1011,7 +1011,7 @@ fn detail_panel(
         .width(pct!(100.0))
         .height(pct!(100.0))
         .overflow_y(Overflow::Auto)
-        .overscroll(Overscroll::Glow)
+        .overscroll(Overscroll::Bounce)
         .padding(Edges::all(28.0))
         .child(column)
 }
